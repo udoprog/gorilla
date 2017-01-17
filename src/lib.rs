@@ -11,7 +11,7 @@ pub enum BlockError {
 }
 
 pub struct Block {
-    bits : BitVec,
+    bits: BitVec,
 }
 
 pub struct BlockBuilder {
@@ -106,7 +106,12 @@ impl<'a> BlockIterator<'a> {
     #[inline]
     fn read_time(&mut self, t0: u64, t1: u64) -> Option<u64> {
         let time_bits = match tryopt!(self.read_leading(5, true)) {
-            0 => 0, 1 => W1, 2 => W2, 3 => W3, 4 => W4, 5 => W5,
+            0 => 0,
+            1 => W1,
+            2 => W2,
+            3 => W3,
+            4 => W4,
+            5 => W5,
             _ => return None,
         };
 
@@ -119,15 +124,19 @@ impl<'a> BlockIterator<'a> {
     #[inline]
     fn read_value(&mut self, v1: f64) -> Option<f64> {
         // value bit is zero, current value is same as last.
-        if ! tryopt!(self.bits.next()) {
+        if !tryopt!(self.bits.next()) {
             return Some(v1);
         }
 
         let (width, trailing) = tryopt!(self.read_previous_bits());
 
         let l_xor = tryopt!(self.read_unsigned(width));
-        let v_xor = if trailing == 64 { 0x0 } else { l_xor << trailing };
-        let uv1 : u64 = unsafe { mem::transmute(v1) };
+        let v_xor = if trailing == 64 {
+            0x0
+        } else {
+            l_xor << trailing
+        };
+        let uv1: u64 = unsafe { mem::transmute(v1) };
         let value = uv1 ^ v_xor;
 
         Some(unsafe { mem::transmute(value) })
@@ -135,17 +144,18 @@ impl<'a> BlockIterator<'a> {
 
     #[inline]
     fn read_previous_bits(&mut self) -> Option<(u64, u64)> {
-        if ! tryopt!(self.bits.next()) {
+        if !tryopt!(self.bits.next()) {
             // control bit is false, inherit previously read bits.
             let (leading, trailing) = tryopt!(self.last_bits);
             let width = (64 - (leading + trailing)) as u64;
-            return Some((width, trailing))
+            return Some((width, trailing));
         }
 
         // control bit is true, read new bits.
         let leading = tryopt!(self.read_unsigned(5));
         let width = match tryopt!(self.read_unsigned(6)) {
-            0 => 64, v => v,
+            0 => 64,
+            v => v,
         };
 
         let shift = leading + width;
@@ -239,7 +249,12 @@ impl<'a> BlockIterator<'a> {
 
 impl Block {
     pub fn iter<'a>(&'a self) -> BlockIterator<'a> {
-        BlockIterator { bits: self.bits.iter(), p0: None, p1: None, last_bits: None }
+        BlockIterator {
+            bits: self.bits.iter(),
+            p0: None,
+            p1: None,
+            last_bits: None,
+        }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -253,7 +268,12 @@ impl Block {
 
 impl BlockBuilder {
     pub fn new() -> BlockBuilder {
-        BlockBuilder { bits: BitVec::new(), p0: None, p1: None, last_bits: None }
+        BlockBuilder {
+            bits: BitVec::new(),
+            p0: None,
+            p1: None,
+            last_bits: None,
+        }
     }
 
     pub fn finalize(self) -> Block {
@@ -261,7 +281,12 @@ impl BlockBuilder {
     }
 
     pub fn iter(&self) -> BlockIterator {
-        BlockIterator { bits: self.bits.iter(), p0: None, p1: None, last_bits: None }
+        BlockIterator {
+            bits: self.bits.iter(),
+            p0: None,
+            p1: None,
+            last_bits: None,
+        }
     }
 
     pub fn push(&mut self, t: u64, v: f64) {
@@ -282,27 +307,27 @@ impl BlockBuilder {
         match dod {
             0 => {
                 self.write_bits(&[false]);
-            },
-            W1_S ... W1_E => {
+            }
+            W1_S...W1_E => {
                 self.write_bits(&[true, false]);
                 self.write_signed(dod, W1);
-            },
-            W2_S ... W2_E => {
+            }
+            W2_S...W2_E => {
                 self.write_bits(&[true, true, false]);
                 self.write_signed(dod, W2);
-            },
-            W3_S ... W3_E => {
+            }
+            W3_S...W3_E => {
                 self.write_bits(&[true, true, true, false]);
                 self.write_signed(dod, W3);
-            },
-            W4_S ... W4_E => {
+            }
+            W4_S...W4_E => {
                 self.write_bits(&[true, true, true, true, false]);
                 self.write_signed(dod, W4);
-            },
-            W5_S ... W5_E => {
+            }
+            W5_S...W5_E => {
                 self.write_bits(&[true, true, true, true, true]);
                 self.write_signed(dod, W5);
-            },
+            }
             _ => {
                 panic!("Unsupported Delta: {}", dod);
             }
@@ -312,8 +337,8 @@ impl BlockBuilder {
     #[inline]
     fn push_value(&mut self, v1: f64, v: f64) {
         let v_xor = {
-            let uv1 : u64 = unsafe { mem::transmute(v1) };
-            let uv : u64 = unsafe { mem::transmute(v) };
+            let uv1: u64 = unsafe { mem::transmute(v1) };
+            let uv: u64 = unsafe { mem::transmute(v) };
             uv1 ^ uv
         };
 
@@ -406,7 +431,7 @@ mod tests {
     fn test_values(values: &[(u64, f64)]) {
         let mut b = BlockBuilder::new();
 
-        for i in (0..values.len()) {
+        for i in 0..values.len() {
             let (t, v) = values[i];
             println!("[in] {}: t={}, v={}", i, t, v);
             b.push(t, v);
@@ -445,31 +470,29 @@ mod tests {
 
     #[test]
     fn test_1() {
-        test_values(&[
-            (0, 3.1), (60, 3.2),
-            (120, 3.3), (180, 3.4),
-            (240, 3.5), (300, 3.6),
-        ]);
+        test_values(&[(0, 3.1), (60, 3.2), (120, 3.3), (180, 3.4), (240, 3.5), (300, 3.6)]);
     }
 
     /// This should cause the encoding to attempt to encode the maximum possible distance in
     /// value.
     #[test]
     fn test_value_limits() {
-        test_values(&[
-            (0, f2b(0xffffffffffffffff)), (1, f2b(0x0)),
-            (2, f2b(0xffffffffffffffff)), (3, f2b(0x0)),
-            (4, f2b(0xffffffffffffffff)), (4, f2b(0x0)),
-        ]);
+        test_values(&[(0, f2b(0xffffffffffffffff)),
+                      (1, f2b(0x0)),
+                      (2, f2b(0xffffffffffffffff)),
+                      (3, f2b(0x0)),
+                      (4, f2b(0xffffffffffffffff)),
+                      (4, f2b(0x0))]);
     }
 
     /// This should cause the encoding to attempt to encode the maximum possible distance in time.
     #[test]
     fn test_time_limits() {
-        test_values(&[
-            (0, 0f64), (0x3fffffffffff, 0f64),
-            (0, 0f64), (0x3fffffffffff, 0f64),
-            (0, 0f64), (0x3fffffffffff, 0f64),
-        ]);
+        test_values(&[(0, 0f64),
+                      (0x3fffffffffff, 0f64),
+                      (0, 0f64),
+                      (0x3fffffffffff, 0f64),
+                      (0, 0f64),
+                      (0x3fffffffffff, 0f64)]);
     }
 }
