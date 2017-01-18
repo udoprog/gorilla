@@ -6,13 +6,168 @@ use bit_vec::BitVec;
 
 use byteorder::{ByteOrder, NativeEndian};
 
+type BitWord = u64;
+
+struct AltBitIter<'a> {
+    bit_vec: &'a AltBitVec,
+    offset: usize,
+}
+
+impl<'a> Iterator for AltBitIter<'a> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<bool> {
+        if self.offset >= self.bit_vec.size {
+            return None;
+        }
+
+        let (index, offset) = self.index_offset(self.offset);
+
+        self.offset += 1;
+
+        Some((self.bit_vec.bits[index] >> offset) & 1 == 1)
+    }
+}
+
+impl<'a> AltBitIter<'a> {
+    /// Load the given size from the current offset.
+    fn load(&mut self, size: usize) -> Option<u64> {
+        if size == 0 {
+            return Some(0);
+        }
+
+        let end = self.offset + size;
+
+        if end > self.bit_vec.size {
+            return None;
+        }
+
+        let start = self.index_offset(self.offset);
+        let end = self.index_offset(self.offset + size);
+
+        self.offset += size;
+
+        println!("{:?} {:?}", start, end);
+
+        let mut total: u64 = 0;
+
+        let bits = std::mem::size_of::<BitWord>() * 8;
+        let range = end.0 - start.0;
+
+        // first segment
+        {
+            let diff = if range == 0 {
+                end.1 - start.1
+            } else {
+                bits - start.1
+            };
+
+            let segment = self.bit_vec.bits[start.0];
+
+            if diff == bits {
+                total = segment;
+            } else {
+                let mask = (1u64 << diff) - 1;
+                let shift = start.1;
+                total += ((segment >> shift) as u64 & mask) as u64;
+            }
+        };
+
+        // iterate over full segments
+        if range > 2 {
+            for (i, v) in ((end.0 + 1)..(start.0 - 1)).enumerate() {
+                println!("{} = {}", i, v);
+            }
+        }
+
+        // last segment
+        if range > 0 {
+            let diff = end.1;
+            let shift = start.1 + ((range - 1) * bits);
+            let mask: u64 = (1u64 << diff) - 1;
+            let segment: u64 = self.bit_vec.bits[end.0 - 1];
+
+            total += (((segment & mask) as u64) << shift) as u64;
+        };
+
+        Some(total)
+    }
+
+    #[inline]
+    fn index_offset(&self, offset: usize) -> (usize, usize) {
+        let bits = std::mem::size_of::<BitWord>() * 8;
+        (offset / bits, offset % bits)
+    }
+}
+
+struct AltBitVecBuilder {
+    bits: Vec<BitWord>,
+    size: usize,
+    word: BitWord,
+}
+
+impl AltBitVecBuilder {
+    fn new() -> AltBitVecBuilder {
+        AltBitVecBuilder {
+            bits: Vec::new(),
+            size: 0usize,
+            word: 0,
+        }
+    }
+
+    fn push(&mut self, value: bool) {
+        let offset = self.size % (std::mem::size_of::<BitWord>() * 8);
+
+        if self.size > 0 && offset == 0 {
+            self.bits.push(self.word);
+            self.word = 0;
+        }
+
+        self.size += 1;
+
+        self.word += if value { 1 } else { 0 } << offset;
+    }
+
+    fn build(mut self) -> AltBitVec {
+        if self.size > 0 {
+            self.bits.push(self.word);
+        }
+
+        AltBitVec {
+            bits: self.bits,
+            size: self.size,
+        }
+    }
+}
+
+struct AltBitVec {
+    bits: Vec<BitWord>,
+    size: usize,
+}
+
+impl AltBitVec {
+    fn new() -> AltBitVec {
+        AltBitVec {
+            bits: Vec::new(),
+            size: 0usize,
+        }
+    }
+
+    fn iter(&self) -> AltBitIter {
+        AltBitIter {
+            bit_vec: self,
+            offset: 0usize,
+        }
+    }
+}
+
 pub struct Block {
-    bits: BitVec,
+    bits: AltBitVec,
 }
 
 pub struct BlockBuilder {
     /// storage
-    bits: BitVec,
+    bits: AltBitVecBuilder,
     /// n - 1 timestamp/value encoded
     p0: Option<(u64, f64)>,
     /// n - 2 timestamp/value encoded
@@ -26,7 +181,7 @@ pub struct BlockBuilder {
 
 pub struct BlockIterator<'a> {
     /// iterator over storage
-    bits: bit_vec::Iter<'a>,
+    bits: AltBitIter<'a>,
     /// n - 1 timestamp/value decoded
     p0: Option<(u64, f64)>,
     /// n - 2 timestamp/value decoded
@@ -266,20 +421,12 @@ impl Block {
             leading_trailing: None,
         }
     }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.bits.to_bytes()
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Block {
-        Block { bits: BitVec::from_bytes(bytes) }
-    }
 }
 
 impl BlockBuilder {
     pub fn new() -> BlockBuilder {
         BlockBuilder {
-            bits: BitVec::new(),
+            bits: AltBitVecBuilder::new(),
             p0: None,
             p1: None,
             leading_trailing: None,
@@ -287,16 +434,7 @@ impl BlockBuilder {
     }
 
     pub fn finalize(self) -> Block {
-        Block { bits: self.bits }
-    }
-
-    pub fn iter(&self) -> BlockIterator {
-        BlockIterator {
-            bits: self.bits.iter(),
-            p0: None,
-            p1: None,
-            leading_trailing: None,
-        }
+        Block { bits: self.bits.build() }
     }
 
     pub fn push(&mut self, t: u64, v: f64) {
@@ -479,6 +617,41 @@ mod tests {
     }
 
     #[test]
+    fn test_bit_vec() {
+        let mut builder = AltBitVecBuilder::new();
+        builder.push(true);
+        builder.push(false);
+        builder.push(true);
+        builder.push(false);
+
+        for i in 4..63 {
+            builder.push(false);
+        }
+
+        builder.push(true);
+
+        builder.push(true);
+        builder.push(false);
+        builder.push(true);
+        builder.push(false);
+
+        let vec = builder.build();
+
+        for (i, v) in vec.iter().enumerate() {
+            println!("{} = {}", i, v);
+        }
+
+        let mut it = vec.iter();
+        println!("{:?}", it.load(64));
+
+        let mut it = vec.iter();
+        println!("{:?}", it.load(4));
+        println!("{:?}", it.load(59));
+        println!("LOL");
+        println!("{:?}", it.load(5));
+    }
+
+    #[test]
     fn test_1() {
         test_values(&[(0, 3.1), (60, 3.2), (120, 3.3), (180, 3.4), (240, 3.5), (300, 3.6)]);
     }
@@ -504,21 +677,5 @@ mod tests {
                       (0x3fffffffffff, 0f64),
                       (0, 0f64),
                       (0x3fffffffffff, 0f64)]);
-    }
-
-    #[test]
-    fn test_repeated_values() {
-        let mut vec: Vec<(u64, f64)> = Vec::new();
-        vec.push((0, 10.0));
-        vec.push((10, 20.0));
-
-        for i in 0..4096 {
-            vec.push((10 * (i + 2), 33.0 + i as f64));
-        }
-
-        let b = build_block(&vec);
-        let bytes = b.to_bytes();
-
-        assert_eq!(bytes.len(), 6292);
     }
 }
