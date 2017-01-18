@@ -1,173 +1,18 @@
-extern crate bit_vec;
 extern crate byteorder;
 
+mod bit_vec;
+
 use std::mem;
-use bit_vec::BitVec;
 
 use byteorder::{ByteOrder, NativeEndian};
 
-type BitWord = u64;
-
-struct AltBitIter<'a> {
-    bit_vec: &'a AltBitVec,
-    offset: usize,
-}
-
-impl<'a> Iterator for AltBitIter<'a> {
-    type Item = bool;
-
-    fn next(&mut self) -> Option<bool> {
-        if self.offset >= self.bit_vec.size {
-            return None;
-        }
-
-        let (index, offset) = self.index_offset(self.offset);
-
-        self.offset += 1;
-
-        Some((self.bit_vec.bits[index] >> offset) & 1 == 1)
-    }
-}
-
-impl<'a> AltBitIter<'a> {
-    /// Load the given size from the current offset.
-    fn load(&mut self, size: usize) -> Option<u64> {
-        if size == 0 {
-            return Some(0);
-        }
-
-        let end = self.offset + size;
-
-        if end > self.bit_vec.size {
-            return None;
-        }
-
-        let start = self.index_offset(self.offset);
-        let end = self.index_offset(self.offset + size);
-
-        self.offset += size;
-
-        println!("{:?} {:?}", start, end);
-
-        let mut total: u64 = 0;
-
-        let bits = std::mem::size_of::<BitWord>() * 8;
-        let range = end.0 - start.0;
-
-        // first segment
-        {
-            let diff = if range == 0 {
-                end.1 - start.1
-            } else {
-                bits - start.1
-            };
-
-            let segment = self.bit_vec.bits[start.0];
-
-            if diff == bits {
-                total = segment;
-            } else {
-                let mask = (1u64 << diff) - 1;
-                let shift = start.1;
-                total += ((segment >> shift) as u64 & mask) as u64;
-            }
-        };
-
-        // iterate over full segments
-        if range > 2 {
-            for (i, v) in ((end.0 + 1)..(start.0 - 1)).enumerate() {
-                println!("{} = {}", i, v);
-            }
-        }
-
-        // last segment
-        if range > 0 {
-            let diff = end.1;
-            let shift = start.1 + ((range - 1) * bits);
-            let mask: u64 = (1u64 << diff) - 1;
-            let segment: u64 = self.bit_vec.bits[end.0 - 1];
-
-            total += (((segment & mask) as u64) << shift) as u64;
-        };
-
-        Some(total)
-    }
-
-    #[inline]
-    fn index_offset(&self, offset: usize) -> (usize, usize) {
-        let bits = std::mem::size_of::<BitWord>() * 8;
-        (offset / bits, offset % bits)
-    }
-}
-
-struct AltBitVecBuilder {
-    bits: Vec<BitWord>,
-    size: usize,
-    word: BitWord,
-}
-
-impl AltBitVecBuilder {
-    fn new() -> AltBitVecBuilder {
-        AltBitVecBuilder {
-            bits: Vec::new(),
-            size: 0usize,
-            word: 0,
-        }
-    }
-
-    fn push(&mut self, value: bool) {
-        let offset = self.size % (std::mem::size_of::<BitWord>() * 8);
-
-        if self.size > 0 && offset == 0 {
-            self.bits.push(self.word);
-            self.word = 0;
-        }
-
-        self.size += 1;
-
-        self.word += if value { 1 } else { 0 } << offset;
-    }
-
-    fn build(mut self) -> AltBitVec {
-        if self.size > 0 {
-            self.bits.push(self.word);
-        }
-
-        AltBitVec {
-            bits: self.bits,
-            size: self.size,
-        }
-    }
-}
-
-struct AltBitVec {
-    bits: Vec<BitWord>,
-    size: usize,
-}
-
-impl AltBitVec {
-    fn new() -> AltBitVec {
-        AltBitVec {
-            bits: Vec::new(),
-            size: 0usize,
-        }
-    }
-
-    fn iter(&self) -> AltBitIter {
-        AltBitIter {
-            bit_vec: self,
-            offset: 0usize,
-        }
-    }
-}
-
 pub struct Block {
-    bits: AltBitVec,
+    bits: bit_vec::BitVec,
 }
 
 pub struct BlockBuilder {
     /// storage
-    bits: AltBitVecBuilder,
+    bits: bit_vec::BitVecBuilder,
     /// n - 1 timestamp/value encoded
     p0: Option<(u64, f64)>,
     /// n - 2 timestamp/value encoded
@@ -181,7 +26,7 @@ pub struct BlockBuilder {
 
 pub struct BlockIterator<'a> {
     /// iterator over storage
-    bits: AltBitIter<'a>,
+    bits: bit_vec::Iter<'a>,
     /// n - 1 timestamp/value decoded
     p0: Option<(u64, f64)>,
     /// n - 2 timestamp/value decoded
@@ -426,7 +271,7 @@ impl Block {
 impl BlockBuilder {
     pub fn new() -> BlockBuilder {
         BlockBuilder {
-            bits: AltBitVecBuilder::new(),
+            bits: bit_vec::BitVec::builder(),
             p0: None,
             p1: None,
             leading_trailing: None,
@@ -458,23 +303,23 @@ impl BlockBuilder {
             }
             W1_S...W1_E => {
                 self.write_bits(&[true, false]);
-                self.write_signed(dod, W1);
+                self.write_i64(dod, W1);
             }
             W2_S...W2_E => {
                 self.write_bits(&[true, true, false]);
-                self.write_signed(dod, W2);
+                self.write_i64(dod, W2);
             }
             W3_S...W3_E => {
                 self.write_bits(&[true, true, true, false]);
-                self.write_signed(dod, W3);
+                self.write_i64(dod, W3);
             }
             W4_S...W4_E => {
                 self.write_bits(&[true, true, true, true, false]);
-                self.write_signed(dod, W4);
+                self.write_i64(dod, W4);
             }
             W5_S...W5_E => {
                 self.write_bits(&[true, true, true, true, true]);
-                self.write_signed(dod, W5);
+                self.write_i64(dod, W5);
             }
             _ => {
                 panic!("Unsupported Delta: {}", dod);
@@ -506,7 +351,7 @@ impl BlockBuilder {
                 let width = (64 - (last_leading + last_trailing)) as u64;
 
                 self.bits.push(false);
-                self.write_unsigned(v_xor >> last_trailing, width);
+                self.write_u64(v_xor >> last_trailing, width);
                 return;
             }
         }
@@ -514,9 +359,9 @@ impl BlockBuilder {
         let width = (64 - (leading + trailing)) as u64;
 
         self.bits.push(true);
-        self.write_unsigned(leading, 5);
-        self.write_unsigned(width, 6);
-        self.write_unsigned(v_xor >> trailing, width);
+        self.write_u64(leading, 5);
+        self.write_u64(width, 6);
+        self.write_u64(v_xor >> trailing, width);
 
         self.leading_trailing = Some((leading, trailing));
     }
@@ -529,14 +374,14 @@ impl BlockBuilder {
     }
 
     #[inline]
-    fn write_unsigned(&mut self, value: u64, bits: u64) {
+    fn write_u64(&mut self, value: u64, bits: u64) {
         for o in (0..bits).rev() {
             self.bits.push(((value >> o) & 0x1) == 0x1);
         }
     }
 
     #[inline]
-    fn write_signed(&mut self, value: i64, bits: u64) {
+    fn write_i64(&mut self, value: i64, bits: u64) {
         for o in (0..bits).rev() {
             self.bits.push(((value >> o) & 0x1) == 0x1);
         }
@@ -614,41 +459,6 @@ mod tests {
 
     fn f2b(bits: u64) -> f64 {
         unsafe { mem::transmute(bits) }
-    }
-
-    #[test]
-    fn test_bit_vec() {
-        let mut builder = AltBitVecBuilder::new();
-        builder.push(true);
-        builder.push(false);
-        builder.push(true);
-        builder.push(false);
-
-        for i in 4..63 {
-            builder.push(false);
-        }
-
-        builder.push(true);
-
-        builder.push(true);
-        builder.push(false);
-        builder.push(true);
-        builder.push(false);
-
-        let vec = builder.build();
-
-        for (i, v) in vec.iter().enumerate() {
-            println!("{} = {}", i, v);
-        }
-
-        let mut it = vec.iter();
-        println!("{:?}", it.load(64));
-
-        let mut it = vec.iter();
-        println!("{:?}", it.load(4));
-        println!("{:?}", it.load(59));
-        println!("LOL");
-        println!("{:?}", it.load(5));
     }
 
     #[test]
