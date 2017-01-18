@@ -6,30 +6,39 @@ use bit_vec::BitVec;
 
 use byteorder::{ByteOrder, NativeEndian};
 
-pub enum BlockError {
-    EndOfIterator,
-}
-
 pub struct Block {
     bits: BitVec,
 }
 
 pub struct BlockBuilder {
+    /// storage
     bits: BitVec,
+    /// n - 1 timestamp/value encoded
     p0: Option<(u64, f64)>,
+    /// n - 2 timestamp/value encoded
     p1: Option<(u64, f64)>,
-    // leading/trailing bits
-    last_bits: Option<(u64, u64)>,
+    /// last observed leading/trailing lengths
+    ///
+    /// first entry encodes the number of leading zeros in the encoded value.
+    /// second entry encodes the length of the meaningful bits.
+    leading_trailing: Option<(u64, u64)>,
 }
 
 pub struct BlockIterator<'a> {
+    /// iterator over storage
     bits: bit_vec::Iter<'a>,
+    /// n - 1 timestamp/value decoded
     p0: Option<(u64, f64)>,
+    /// n - 2 timestamp/value decoded
     p1: Option<(u64, f64)>,
-    // leading/trailing bits
-    last_bits: Option<(u64, u64)>,
+    /// last observed leading/trailing lengths
+    ///
+    /// first entry encodes the number of leading zeros in the encoded value.
+    /// second entry encodes the length of the meaningful bits.
+    leading_trailing: Option<(u64, u64)>,
 }
 
+/// Macro to read and supply the given Option expression
 macro_rules! read_or_set {
     ($x:expr, $reader:expr) => {
         match $x {
@@ -86,7 +95,7 @@ impl<'a> Iterator for BlockIterator<'a> {
     type Item = (u64, f64);
 
     fn next(&mut self) -> Option<(u64, f64)> {
-        // TODO: partial compression for the second (p1) point.
+        // TODO: partial compression for the second (p1) point?
 
         let (t0, v0) = read_or_set!(self.p0, || self.read_full());
         let (t1, v1) = read_or_set!(self.p1, || self.read_partial(v0));
@@ -115,7 +124,7 @@ impl<'a> BlockIterator<'a> {
             _ => return None,
         };
 
-        let d = tryopt!(self.read_signed(time_bits));
+        let d = tryopt!(self.read_i64(time_bits));
         let r = d + ((t1 + t1) as i64 - t0 as i64);
 
         Some(r as u64)
@@ -130,12 +139,13 @@ impl<'a> BlockIterator<'a> {
 
         let (width, trailing) = tryopt!(self.read_previous_bits());
 
-        let l_xor = tryopt!(self.read_unsigned(width));
+        let l_xor = tryopt!(self.read_u64(width));
         let v_xor = if trailing == 64 {
             0x0
         } else {
             l_xor << trailing
         };
+
         let uv1: u64 = unsafe { mem::transmute(v1) };
         let value = uv1 ^ v_xor;
 
@@ -144,16 +154,16 @@ impl<'a> BlockIterator<'a> {
 
     #[inline]
     fn read_previous_bits(&mut self) -> Option<(u64, u64)> {
+        // control bit is false, inherit previous value
         if !tryopt!(self.bits.next()) {
-            // control bit is false, inherit previously read bits.
-            let (leading, trailing) = tryopt!(self.last_bits);
+            let (leading, trailing) = tryopt!(self.leading_trailing);
             let width = (64 - (leading + trailing)) as u64;
             return Some((width, trailing));
         }
 
         // control bit is true, read new bits.
-        let leading = tryopt!(self.read_unsigned(5));
-        let width = match tryopt!(self.read_unsigned(6)) {
+        let leading = tryopt!(self.read_u64(5));
+        let width = match tryopt!(self.read_u64(6)) {
             0 => 64,
             v => v,
         };
@@ -161,7 +171,7 @@ impl<'a> BlockIterator<'a> {
         let shift = leading + width;
         let trailing = (64 - shift) as u64;
 
-        self.last_bits = Some((leading, trailing));
+        self.leading_trailing = Some((leading, trailing));
         Some((width, trailing))
     }
 
@@ -178,22 +188,22 @@ impl<'a> BlockIterator<'a> {
     }
 
     #[inline]
-    fn read_signed(&mut self, bits: u64) -> Option<i64> {
-        self.read_unsigned(bits).map(|value| {
-            if bits > 0 && value >> bits - 1 == 1 {
-                // println!("result: {}", (((value - 1) ^ ((1 << bits) - 1)) as i64) * -1);
-                // println!("versus: {}", value as i64 - (1 << bits));
-                // value as i64 - (1 << bits)
-                let x = std::u64::MAX >> (64 - bits);
-                !(((value - 1) ^ x) as i64) + 1
-            } else {
-                value as i64
-            }
-        })
+    fn read_i64(&mut self, bits: u64) -> Option<i64> {
+        let value = tryopt!(self.read_u64(bits));
+
+        let value = if bits > 0 && value >> bits - 1 == 1 {
+            // value as i64 - (1 << bits)
+            let x = std::u64::MAX >> (64 - bits);
+            !(((value - 1) ^ x) as i64) + 1
+        } else {
+            value as i64
+        };
+
+        Some(value)
     }
 
     #[inline]
-    fn read_unsigned(&mut self, bits: u64) -> Option<u64> {
+    fn read_u64(&mut self, bits: u64) -> Option<u64> {
         if bits <= 0 {
             return Some(0u64);
         }
@@ -253,7 +263,7 @@ impl Block {
             bits: self.bits.iter(),
             p0: None,
             p1: None,
-            last_bits: None,
+            leading_trailing: None,
         }
     }
 
@@ -272,7 +282,7 @@ impl BlockBuilder {
             bits: BitVec::new(),
             p0: None,
             p1: None,
-            last_bits: None,
+            leading_trailing: None,
         }
     }
 
@@ -285,7 +295,7 @@ impl BlockBuilder {
             bits: self.bits.iter(),
             p0: None,
             p1: None,
-            last_bits: None,
+            leading_trailing: None,
         }
     }
 
@@ -352,7 +362,7 @@ impl BlockBuilder {
         let leading = v_xor.leading_zeros() as u64;
         let trailing = v_xor.trailing_zeros() as u64;
 
-        if let Some((last_leading, last_trailing)) = self.last_bits {
+        if let Some((last_leading, last_trailing)) = self.leading_trailing {
             // if the number of trailing/leading zeros are compatible with what came before.
             if leading >= last_leading && trailing >= last_trailing {
                 let width = (64 - (last_leading + last_trailing)) as u64;
@@ -370,7 +380,7 @@ impl BlockBuilder {
         self.write_unsigned(width, 6);
         self.write_unsigned(v_xor >> trailing, width);
 
-        self.last_bits = Some((leading, trailing));
+        self.leading_trailing = Some((leading, trailing));
     }
 
     #[inline]
@@ -428,23 +438,23 @@ mod tests {
     use super::*;
     use std::mem;
 
-    fn test_values(values: &[(u64, f64)]) {
+    fn build_block(values: &[(u64, f64)]) -> Block {
         let mut b = BlockBuilder::new();
 
-        for i in 0..values.len() {
-            let (t, v) = values[i];
-            println!("[in] {}: t={}, v={}", i, t, v);
+        for &(t, v) in values {
             b.push(t, v);
         }
 
-        let r = b.finalize();
+        b.finalize()
+    }
+
+    fn test_values(values: &[(u64, f64)]) {
+        let r = build_block(values);
 
         let mut c = 0;
 
         for (i, (t, v)) in r.iter().enumerate() {
             let (rt, rv) = values[i];
-
-            println!("[out] {}: rt={}, rv={}, t={}, v={}", i, rt, rv, t, v);
 
             assert_eq!(rt, t);
 
@@ -494,5 +504,21 @@ mod tests {
                       (0x3fffffffffff, 0f64),
                       (0, 0f64),
                       (0x3fffffffffff, 0f64)]);
+    }
+
+    #[test]
+    fn test_repeated_values() {
+        let mut vec: Vec<(u64, f64)> = Vec::new();
+        vec.push((0, 10.0));
+        vec.push((10, 20.0));
+
+        for i in 0..4096 {
+            vec.push((10 * (i + 2), 33.0 + i as f64));
+        }
+
+        let b = build_block(&vec);
+        let bytes = b.to_bytes();
+
+        assert_eq!(bytes.len(), 6292);
     }
 }
