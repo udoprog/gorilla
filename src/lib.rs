@@ -1,7 +1,17 @@
+//! [<img alt="github" src="https://img.shields.io/badge/github-udoprog/gorilla-8da0cb?style=for-the-badge&logo=github" height="20">](https://github.com/udoprog/gorilla)
+//! [<img alt="crates.io" src="https://img.shields.io/crates/v/gorilla.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/gorilla)
+//! [<img alt="docs.rs" src="https://img.shields.io/badge/docs.rs-gorilla-66c2a5?style=for-the-badge&logoColor=white&logo=data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDUxMiA1MTIiPjxwYXRoIGZpbGw9IiNmNWY1ZjUiIGQ9Ik00ODguNiAyNTAuMkwzOTIgMjE0VjEwNS41YzAtMTUtOS4zLTI4LjQtMjMuNC0zMy43bC0xMDAtMzcuNWMtOC4xLTMuMS0xNy4xLTMuMS0yNS4zIDBsLTEwMCAzNy41Yy0xNC4xIDUuMy0yMy40IDE4LjctMjMuNCAzMy43VjIxNGwtOTYuNiAzNi4yQzkuMyAyNTUuNSAwIDI2OC45IDAgMjgzLjlWMzk0YzAgMTMuNiA3LjcgMjYuMSAxOS45IDMyLjJsMTAwIDUwYzEwLjEgNS4xIDIyLjEgNS4xIDMyLjIgMGwxMDMuOS01MiAxMDMuOSA1MmMxMC4xIDUuMSAyMi4xIDUuMSAzMi4yIDBsMTAwLTUwYzEyLjItNi4xIDE5LjktMTguNiAxOS45LTMyLjJWMjgzLjljMC0xNS05LjMtMjguNC0yMy40LTMzLjd6TTM1OCAyMTQuOGwtODUgMzEuOXYtNjguMmw4NS0zN3Y3My4zek0xNTQgMTA0LjFsMTAyLTM4LjIgMTAyIDM4LjJ2LjZsLTEwMiA0MS40LTEwMi00MS40di0uNnptODQgMjkxLjFsLTg1IDQyLjV2LTc5LjFsODUtMzguOHY3NS40em0wLTExMmwtMTAyIDQxLjQtMTAyLTQxLjR2LS42bDEwMi0zOC4yIDEwMiAzOC4ydi42em0yNDAgMTEybC04NSA0Mi41di03OS4xbDg1LTM4Ljh2NzUuNHptMC0xMTJsLTEwMiA0MS40LTEwMi00MS40di0uNmwxMDItMzguMiAxMDIgMzguMnYuNnoiPjwvcGF0aD48L3N2Zz4K" height="20">](https://docs.rs/gorilla)
+//! [<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/udoprog/gorilla/ci.yml?branch=main&style=for-the-badge" height="20">](https://github.com/udoprog/gorilla/actions?query=branch%3Amain)
+//!
+//! An implementation of Gorilla compression for Rust.
+//!
+//! This was my first ever Rust project. I've kept it mostly as-is, only
+//! following clippy and removing some instances of unsafe. Needless to say, you
+//! should *probably* not be using this.
+
 extern crate bit_vec;
 extern crate byteorder;
 
-use std::mem;
 use bit_vec::BitVec;
 
 use byteorder::{ByteOrder, NativeEndian};
@@ -38,9 +48,9 @@ macro_rules! read_or_set {
                 let p = tryopt!($reader());
                 $x = Some(p);
                 return Some(p);
-            },
+            }
         }
-    }
+    };
 }
 
 macro_rules! write_or_set {
@@ -50,15 +60,18 @@ macro_rules! write_or_set {
             None => {
                 $x = Some(($t, $v));
                 return $writer($t, $v);
-            },
+            }
         }
-    }
+    };
 }
 
 macro_rules! tryopt {
     ($s:expr) => {
-        match $s { Some(s) => s, None => return None, }
-    }
+        match $s {
+            Some(s) => s,
+            None => return None,
+        }
+    };
 }
 
 const W1: u64 = 7;
@@ -98,7 +111,7 @@ impl<'a> Iterator for BlockIterator<'a> {
         self.p0 = self.p1;
         self.p1 = Some((time, v));
 
-        return Some((time, v));
+        Some((time, v))
     }
 }
 
@@ -136,10 +149,10 @@ impl<'a> BlockIterator<'a> {
         } else {
             l_xor << trailing
         };
-        let uv1: u64 = unsafe { mem::transmute(v1) };
+        let uv1: u64 = v1.to_bits();
         let value = uv1 ^ v_xor;
 
-        Some(unsafe { mem::transmute(value) })
+        Some(f64::from_bits(value))
     }
 
     #[inline]
@@ -147,7 +160,7 @@ impl<'a> BlockIterator<'a> {
         if !tryopt!(self.bits.next()) {
             // control bit is false, inherit previously read bits.
             let (leading, trailing) = tryopt!(self.last_bits);
-            let width = (64 - (leading + trailing)) as u64;
+            let width = 64 - (leading + trailing);
             return Some((width, trailing));
         }
 
@@ -159,7 +172,7 @@ impl<'a> BlockIterator<'a> {
         };
 
         let shift = leading + width;
-        let trailing = (64 - shift) as u64;
+        let trailing = 64 - shift;
 
         self.last_bits = Some((leading, trailing));
         Some((width, trailing))
@@ -180,7 +193,7 @@ impl<'a> BlockIterator<'a> {
     #[inline]
     fn read_signed(&mut self, bits: u64) -> Option<i64> {
         self.read_unsigned(bits).map(|value| {
-            if bits > 0 && value >> bits - 1 == 1 {
+            if bits > 0 && value >> (bits - 1) == 1 {
                 // println!("result: {}", (((value - 1) ^ ((1 << bits) - 1)) as i64) * -1);
                 // println!("versus: {}", value as i64 - (1 << bits));
                 // value as i64 - (1 << bits)
@@ -194,7 +207,7 @@ impl<'a> BlockIterator<'a> {
 
     #[inline]
     fn read_unsigned(&mut self, bits: u64) -> Option<u64> {
-        if bits <= 0 {
+        if bits == 0 {
             return Some(0u64);
         }
 
@@ -248,7 +261,7 @@ impl<'a> BlockIterator<'a> {
 }
 
 impl Block {
-    pub fn iter<'a>(&'a self) -> BlockIterator<'a> {
+    pub fn iter(&self) -> BlockIterator<'_> {
         BlockIterator {
             bits: self.bits.iter(),
             p0: None,
@@ -262,7 +275,9 @@ impl Block {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Block {
-        Block { bits: BitVec::from_bytes(bytes) }
+        Block {
+            bits: BitVec::from_bytes(bytes),
+        }
     }
 }
 
@@ -308,23 +323,23 @@ impl BlockBuilder {
             0 => {
                 self.write_bits(&[false]);
             }
-            W1_S...W1_E => {
+            W1_S..=W1_E => {
                 self.write_bits(&[true, false]);
                 self.write_signed(dod, W1);
             }
-            W2_S...W2_E => {
+            W2_S..=W2_E => {
                 self.write_bits(&[true, true, false]);
                 self.write_signed(dod, W2);
             }
-            W3_S...W3_E => {
+            W3_S..=W3_E => {
                 self.write_bits(&[true, true, true, false]);
                 self.write_signed(dod, W3);
             }
-            W4_S...W4_E => {
+            W4_S..=W4_E => {
                 self.write_bits(&[true, true, true, true, false]);
                 self.write_signed(dod, W4);
             }
-            W5_S...W5_E => {
+            W5_S..=W5_E => {
                 self.write_bits(&[true, true, true, true, true]);
                 self.write_signed(dod, W5);
             }
@@ -337,8 +352,8 @@ impl BlockBuilder {
     #[inline]
     fn push_value(&mut self, v1: f64, v: f64) {
         let v_xor = {
-            let uv1: u64 = unsafe { mem::transmute(v1) };
-            let uv: u64 = unsafe { mem::transmute(v) };
+            let uv1: u64 = v1.to_bits();
+            let uv: u64 = v.to_bits();
             uv1 ^ uv
         };
 
@@ -355,7 +370,7 @@ impl BlockBuilder {
         if let Some((last_leading, last_trailing)) = self.last_bits {
             // if the number of trailing/leading zeros are compatible with what came before.
             if leading >= last_leading && trailing >= last_trailing {
-                let width = (64 - (last_leading + last_trailing)) as u64;
+                let width = 64 - (last_leading + last_trailing);
 
                 self.bits.push(false);
                 self.write_unsigned(v_xor >> last_trailing, width);
@@ -363,7 +378,7 @@ impl BlockBuilder {
             }
         }
 
-        let width = (64 - (leading + trailing)) as u64;
+        let width = 64 - (leading + trailing);
 
         self.bits.push(true);
         self.write_unsigned(leading, 5);
@@ -423,16 +438,20 @@ impl BlockBuilder {
     }
 }
 
+impl Default for BlockBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::mem;
 
     fn test_values(values: &[(u64, f64)]) {
         let mut b = BlockBuilder::new();
 
-        for i in 0..values.len() {
-            let (t, v) = values[i];
+        for (i, &(t, v)) in values.iter().enumerate() {
             println!("[in] {}: t={}, v={}", i, t, v);
             b.push(t, v);
         }
@@ -461,38 +480,49 @@ mod tests {
     }
 
     fn float_to_bits(f: f64) -> u64 {
-        unsafe { mem::transmute(f) }
+        f.to_bits()
     }
 
     fn f2b(bits: u64) -> f64 {
-        unsafe { mem::transmute(bits) }
+        f64::from_bits(bits)
     }
 
     #[test]
     fn test_1() {
-        test_values(&[(0, 3.1), (60, 3.2), (120, 3.3), (180, 3.4), (240, 3.5), (300, 3.6)]);
+        test_values(&[
+            (0, 3.1),
+            (60, 3.2),
+            (120, 3.3),
+            (180, 3.4),
+            (240, 3.5),
+            (300, 3.6),
+        ]);
     }
 
     /// This should cause the encoding to attempt to encode the maximum possible distance in
     /// value.
     #[test]
     fn test_value_limits() {
-        test_values(&[(0, f2b(0xffffffffffffffff)),
-                      (1, f2b(0x0)),
-                      (2, f2b(0xffffffffffffffff)),
-                      (3, f2b(0x0)),
-                      (4, f2b(0xffffffffffffffff)),
-                      (4, f2b(0x0))]);
+        test_values(&[
+            (0, f2b(0xffffffffffffffff)),
+            (1, f2b(0x0)),
+            (2, f2b(0xffffffffffffffff)),
+            (3, f2b(0x0)),
+            (4, f2b(0xffffffffffffffff)),
+            (4, f2b(0x0)),
+        ]);
     }
 
     /// This should cause the encoding to attempt to encode the maximum possible distance in time.
     #[test]
     fn test_time_limits() {
-        test_values(&[(0, 0f64),
-                      (0x3fffffffffff, 0f64),
-                      (0, 0f64),
-                      (0x3fffffffffff, 0f64),
-                      (0, 0f64),
-                      (0x3fffffffffff, 0f64)]);
+        test_values(&[
+            (0, 0f64),
+            (0x3fffffffffff, 0f64),
+            (0, 0f64),
+            (0x3fffffffffff, 0f64),
+            (0, 0f64),
+            (0x3fffffffffff, 0f64),
+        ]);
     }
 }

@@ -1,8 +1,15 @@
 [package]
-name = "tsz"
+name = "gorilla"
 version = "0.1.0"
-license = "MIT"
 authors = ["John-John Tedro <udoprog@tedro.se>"]
+description = "An implementation of Gorilla compression for Rust"
+documentation = "https://docs.rs/gorilla"
+readme = "README.md"
+homepage = "https://github.com/udoprog/gorilla"
+repository = "https://github.com/udoprog/gorilla"
+license = "MIT/Apache-2.0"
+keywords = ["compression", "gorilla", "series", "time"]
+categories = ["compression"]
 
 [dependencies]
 bit-vec = "0.4.3"
