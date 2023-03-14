@@ -12,5 +12,5 @@ keywords = ["compression", "gorilla", "series", "time"]
 categories = ["compression"]
 
 [dependencies]
-bit-vec = "0.4.3"
-byteorder = "1.0.0"
+bit-vec = "0.6.3"
+byteorder = "1.4.3"
