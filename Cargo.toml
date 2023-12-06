@@ -8,7 +8,7 @@ documentation = "https://docs.rs/gorilla"
 readme = "README.md"
 homepage = "https://github.com/udoprog/gorilla"
 repository = "https://github.com/udoprog/gorilla"
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 keywords = ["compression", "gorilla", "series", "time"]
 categories = ["compression"]
 
