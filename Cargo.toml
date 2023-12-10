@@ -2,7 +2,7 @@
 name = "gorilla"
 version = "0.2.2"
 authors = ["John-John Tedro <udoprog@tedro.se>"]
-rust-version = "1.56"
+rust-version = "1.60"
 description = "An implementation of Gorilla compression for Rust"
 documentation = "https://docs.rs/gorilla"
 readme = "README.md"
