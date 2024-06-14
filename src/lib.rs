@@ -8,9 +8,6 @@
 //! following clippy and removing some instances of unsafe. Needless to say, you
 //! should *probably* not be using this.
 
-extern crate bit_vec;
-extern crate byteorder;
-
 use bit_vec::BitVec;
 
 use byteorder::{ByteOrder, NativeEndian};
@@ -196,7 +193,7 @@ impl<'a> BlockIterator<'a> {
                 // println!("result: {}", (((value - 1) ^ ((1 << bits) - 1)) as i64) * -1);
                 // println!("versus: {}", value as i64 - (1 << bits));
                 // value as i64 - (1 << bits)
-                let x = std::u64::MAX >> (64 - bits);
+                let x = u64::MAX >> (64 - bits);
                 !(((value - 1) ^ x) as i64) + 1
             } else {
                 value as i64
