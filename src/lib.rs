@@ -91,7 +91,7 @@ const W5: u64 = 48;
 const W5_S: i64 = 1 - (1 << (W5 - 1));
 const W5_E: i64 = 1 << (W5 - 1);
 
-impl<'a> Iterator for BlockIterator<'a> {
+impl Iterator for BlockIterator<'_> {
     type Item = (u64, f64);
 
     fn next(&mut self) -> Option<(u64, f64)> {
@@ -111,7 +111,7 @@ impl<'a> Iterator for BlockIterator<'a> {
     }
 }
 
-impl<'a> BlockIterator<'a> {
+impl BlockIterator<'_> {
     #[inline]
     fn read_time(&mut self, t0: u64, t1: u64) -> Option<u64> {
         let time_bits = match tryopt!(self.read_leading(5, true)) {
