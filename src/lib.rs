@@ -291,7 +291,7 @@ impl BlockBuilder {
         Block { bits: self.bits }
     }
 
-    pub fn iter(&self) -> BlockIterator {
+    pub fn iter(&self) -> BlockIterator<'_> {
         BlockIterator {
             bits: self.bits.iter(),
             p0: None,
