@@ -3,7 +3,7 @@ name = "gorilla"
 version = "0.2.2"
 authors = ["John-John Tedro <udoprog@tedro.se>"]
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.85"
 description = "An implementation of Gorilla compression for Rust"
 documentation = "https://docs.rs/gorilla"
 readme = "README.md"
@@ -14,5 +14,5 @@ keywords = ["compression", "gorilla", "series", "time"]
 categories = ["compression"]
 
 [dependencies]
-bit-vec = "0.6.3"
+bit-vec = "0.10.1"
 byteorder = "1.4.3"
